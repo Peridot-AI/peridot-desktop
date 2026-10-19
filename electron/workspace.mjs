@@ -16,8 +16,16 @@ function readStore() {
 }
 function remember(dir) {
   const recent = [dir, ...readStore().recent.filter((d) => d !== dir)].slice(0, 8);
-  fs.writeFileSync(storeFile(), JSON.stringify({ recent }));
+  fs.writeFileSync(storeFile(), JSON.stringify({ recent, last: dir }));
   return recent;
+}
+// The folder that was open last time comes back on startup, until it is closed on purpose
+let restored = false;
+function restoreLast() {
+  if (restored) return;
+  restored = true;
+  const { last } = readStore();
+  if (!root && last && isDir(last)) root = fs.realpathSync(last);
 }
 const isDir = (p) => { try { return fs.statSync(p).isDirectory(); } catch { return false; } };
 
@@ -140,7 +148,7 @@ function runCommand({ command }) {
 const TOOLS = { list_files: listFiles, read_file: readFile, search, write_file: writeFile, edit_file: editFile, run_command: runCommand };
 
 export function registerWorkspaceIpc() {
-  ipcMain.handle("workspace:get", () => ({ root, recent: readStore().recent.filter(isDir) }));
+  ipcMain.handle("workspace:get", () => { restoreLast(); return { root, recent: readStore().recent.filter(isDir) }; });
 
   ipcMain.handle("workspace:pick", async (event) => {
     const win = BrowserWindow.fromWebContents(event.sender);
@@ -158,7 +166,10 @@ export function registerWorkspaceIpc() {
     return { root, recent: remember(root) };
   });
 
-  ipcMain.handle("workspace:close", () => { root = null; });
+  ipcMain.handle("workspace:close", () => {
+    root = null;
+    try { fs.writeFileSync(storeFile(), JSON.stringify({ recent: readStore().recent, last: null })); } catch {}
+  });
 
   ipcMain.handle("workspace:tool", async (_e, name, input) => {
     const fn = TOOLS[name];
