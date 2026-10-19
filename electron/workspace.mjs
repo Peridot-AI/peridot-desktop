@@ -64,7 +64,7 @@ function readText(abs) {
   return buf.toString("utf8");
 }
 
-function readFile({ path: p, offset = 1, limit = 2000 }) {
+function readFile({ path: p, offset = 1, limit = 400 }) {
   const lines = readText(inside(p)).split("\n");
   const start = Math.max(1, offset);
   const slice = lines.slice(start - 1, start - 1 + limit);
