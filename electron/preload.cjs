@@ -20,9 +20,21 @@ contextBridge.exposeInMainWorld("peridotDesktop", {
       return () => ipcRenderer.removeListener("win:maximized", h);
     },
   },
+  // Integrated terminal (shell in the project folder)
+  term: {
+    start: (cols, rows) => ipcRenderer.invoke("term:start", cols, rows),
+    write: (id, data) => ipcRenderer.invoke("term:write", id, data),
+    resize: (id, cols, rows) => ipcRenderer.invoke("term:resize", id, cols, rows),
+    kill: (id) => ipcRenderer.invoke("term:kill", id),
+    on: (event, cb) => {
+      const ch = "term:" + event;
+      const h = (_e, ...args) => cb(...args);
+      ipcRenderer.on(ch, h);
+      return () => ipcRenderer.removeListener(ch, h);
+    },
+  },
   workspace: {
     reveal: () => ipcRenderer.invoke("workspace:reveal"),
-    terminal: () => ipcRenderer.invoke("workspace:terminal"),
     get: () => ipcRenderer.invoke("workspace:get"),
     pick: () => ipcRenderer.invoke("workspace:pick"),
     open: (dir) => ipcRenderer.invoke("workspace:open", dir),

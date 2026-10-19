@@ -147,6 +147,8 @@ function runCommand({ command }) {
 
 const TOOLS = { list_files: listFiles, read_file: readFile, search, write_file: writeFile, edit_file: editFile, run_command: runCommand };
 
+export const getRoot = () => root;
+
 export function registerWorkspaceIpc() {
   ipcMain.handle("workspace:get", () => { restoreLast(); return { root, recent: readStore().recent.filter(isDir) }; });
 
@@ -183,27 +185,6 @@ export function registerWorkspaceIpc() {
 
   // Show the project in the system file manager
   ipcMain.handle("workspace:reveal", () => (root ? shell.openPath(root) : "No folder is open."));
-
-  // Open the system terminal inside the project folder
-  ipcMain.handle("workspace:terminal", () => {
-    if (!root) return false;
-    const opts = { cwd: root, detached: true, stdio: "ignore" };
-    const tries = process.platform === "win32"
-      ? [["cmd.exe", ["/c", "start", "cmd.exe", "/K"]]]
-      : process.platform === "darwin"
-        ? [["open", ["-a", "Terminal", root]]]
-        : [["x-terminal-emulator", []], ["gnome-terminal", []], ["konsole", []], ["xfce4-terminal", []], ["kitty", []], ["alacritty", []], ["foot", []], ["xterm", []]];
-    return new Promise((resolve) => {
-      const next = (i) => {
-        if (i >= tries.length) return resolve(false);
-        const [cmd, args] = tries[i];
-        const child = spawn(cmd, args, opts);
-        child.once("error", () => next(i + 1));
-        child.once("spawn", () => { child.unref(); resolve(true); });
-      };
-      next(0);
-    });
-  });
 
   ipcMain.handle("workspace:stop", () => { for (const c of running) c.kill("SIGKILL"); });
 }
