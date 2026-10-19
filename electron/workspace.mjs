@@ -1,5 +1,5 @@
 // File and shell tools for the coding agent. Everything is confined to the folder the user picked.
-import { app, dialog, ipcMain, BrowserWindow } from "electron";
+import { app, dialog, ipcMain, BrowserWindow, shell } from "electron";
 import fs from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
@@ -15,7 +15,7 @@ function readStore() {
   try { return JSON.parse(fs.readFileSync(storeFile(), "utf8")); } catch { return { recent: [] }; }
 }
 function remember(dir) {
-  const recent = [dir, ...readStore().recent.filter((d) => d !== dir)].slice(0, 8);
+  const recent = [dir, ...readStore().recent.filter((d) => d !== dir)].slice(0, 50);
   fs.writeFileSync(storeFile(), JSON.stringify({ recent, last: dir }));
   return recent;
 }
@@ -179,6 +179,30 @@ export function registerWorkspaceIpc() {
     } catch (err) {
       return { ok: false, output: err.message || String(err) };
     }
+  });
+
+  // Show the project in the system file manager
+  ipcMain.handle("workspace:reveal", () => (root ? shell.openPath(root) : "No folder is open."));
+
+  // Open the system terminal inside the project folder
+  ipcMain.handle("workspace:terminal", () => {
+    if (!root) return false;
+    const opts = { cwd: root, detached: true, stdio: "ignore" };
+    const tries = process.platform === "win32"
+      ? [["cmd.exe", ["/c", "start", "cmd.exe", "/K"]]]
+      : process.platform === "darwin"
+        ? [["open", ["-a", "Terminal", root]]]
+        : [["x-terminal-emulator", []], ["gnome-terminal", []], ["konsole", []], ["xfce4-terminal", []], ["kitty", []], ["alacritty", []], ["foot", []], ["xterm", []]];
+    return new Promise((resolve) => {
+      const next = (i) => {
+        if (i >= tries.length) return resolve(false);
+        const [cmd, args] = tries[i];
+        const child = spawn(cmd, args, opts);
+        child.once("error", () => next(i + 1));
+        child.once("spawn", () => { child.unref(); resolve(true); });
+      };
+      next(0);
+    });
   });
 
   ipcMain.handle("workspace:stop", () => { for (const c of running) c.kill("SIGKILL"); });

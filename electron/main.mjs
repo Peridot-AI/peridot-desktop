@@ -33,6 +33,15 @@ function registerAppProtocol() {
 const AUTH_PORT = 53682;
 let authServer = null;
 
+const winOf = (e) => BrowserWindow.fromWebContents(e.sender);
+ipcMain.handle("win:minimize", (e) => winOf(e)?.minimize());
+ipcMain.handle("win:toggle-maximize", (e) => {
+  const w = winOf(e);
+  if (w) w.isMaximized() ? w.unmaximize() : w.maximize();
+});
+ipcMain.handle("win:close", (e) => winOf(e)?.close());
+ipcMain.handle("win:is-maximized", (e) => !!winOf(e)?.isMaximized());
+
 ipcMain.handle("open-external", (_e, url) => {
   const u = new URL(String(url));
   if (u.protocol !== "https:" && u.protocol !== "http:") throw new Error("Blocked URL.");
@@ -96,6 +105,7 @@ function createWindow() {
     minHeight: 600,
     backgroundColor: "#0b0b0c",
     autoHideMenuBar: true,
+    frame: false, // the app draws its own top bar with the window buttons
     show: false,
     icon: path.join(here, "..", "public", "logo.png"),
     webPreferences: {
@@ -107,6 +117,10 @@ function createWindow() {
   });
 
   win.once("ready-to-show", () => win.show());
+
+  const tell = () => !win.isDestroyed() && win.webContents.send("win:maximized", win.isMaximized());
+  win.on("maximize", tell);
+  win.on("unmaximize", tell);
 
   // External links open in the user's browser, never inside the app window
   win.webContents.setWindowOpenHandler(({ url }) => {
