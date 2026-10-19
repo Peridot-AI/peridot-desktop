@@ -12,6 +12,7 @@
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^7.3.0",
     "@tsconfig/svelte": "^5.0.8",
+    "@types/dompurify": "^3.2.0",
     "@types/node": "^24.13.3",
     "svelte": "^5.57.0",
     "svelte-check": "^4.7.6",
@@ -20,6 +21,8 @@
   },
   "dependencies": {
     "@iconify/svelte": "^5.2.2",
+    "dompurify": "^3.4.17",
+    "marked": "^18.1.1",
     "svelte-spa-router": "^5.1.1"
   }
 }
