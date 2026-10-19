@@ -27,3 +27,5 @@ server/data/
 # secrets
 .env
 server/.env
+
+release
