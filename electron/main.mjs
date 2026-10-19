@@ -1,4 +1,7 @@
-import { app, BrowserWindow, protocol, net, shell, Menu } from "electron";
+import { app, BrowserWindow, protocol, net, shell, Menu, ipcMain } from "electron";
+import http from "node:http";
+import crypto from "node:crypto";
+import { registerWorkspaceIpc } from "./workspace.mjs";
 import path from "node:path";
 import fs from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -23,6 +26,64 @@ function registerAppProtocol() {
   });
 }
 
+// Google refuses OAuth inside embedded windows, so sign-in happens in the user's own browser.
+// A one-shot loopback server on 127.0.0.1 receives the token (implicit flow returns it in the
+// URL fragment, so a tiny page forwards it to the server). Add this redirect URI to the OAuth
+// client in Google Cloud Console: http://127.0.0.1:53682/callback
+const AUTH_PORT = 53682;
+let authServer = null;
+
+ipcMain.handle("open-external", (_e, url) => {
+  const u = new URL(String(url));
+  if (u.protocol !== "https:" && u.protocol !== "http:") throw new Error("Blocked URL.");
+  return shell.openExternal(u.toString());
+});
+
+ipcMain.handle("google-auth", (event, clientId) => {
+  if (typeof clientId !== "string" || !clientId) throw new Error("Google sign-in is not configured.");
+  authServer?.close();
+  const state = crypto.randomBytes(16).toString("hex");
+  const redirect = `http://127.0.0.1:${AUTH_PORT}/callback`;
+
+  return new Promise((resolve, reject) => {
+    let done = false;
+    const finish = (err, token) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      server.close();
+      authServer = null;
+      err ? reject(err) : resolve(token);
+    };
+    const server = http.createServer((req, res) => {
+      const url = new URL(req.url, redirect);
+      if (url.pathname === "/callback") {
+        res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+        res.end(`<!doctype html><meta charset="utf-8"><title>Peridot</title>
+<body style="font-family:sans-serif;background:#141413;color:#eee;text-align:center;padding-top:20vh">
+<h2 id="m">Signing you in…</h2><script>
+fetch("/token?" + location.hash.slice(1)).then(function(){document.getElementById("m").textContent="Signed in. You can close this tab and return to Peridot."});
+</script>`);
+      } else if (url.pathname === "/token") {
+        res.writeHead(204).end();
+        if (url.searchParams.get("state") !== state) return finish(new Error("Google sign-in failed"));
+        const token = url.searchParams.get("access_token");
+        token ? finish(null, token) : finish(new Error(url.searchParams.get("error") || "Google sign-in failed"));
+        BrowserWindow.fromWebContents(event.sender)?.focus();
+      } else {
+        res.writeHead(404).end();
+      }
+    });
+    const timer = setTimeout(() => finish(new Error("Google sign-in timed out")), 5 * 60 * 1000);
+    server.on("error", (e) => finish(e));
+    server.listen(AUTH_PORT, "127.0.0.1", () => {
+      authServer = server;
+      const q = new URLSearchParams({ client_id: clientId, redirect_uri: redirect, response_type: "token", scope: "openid email profile", state, prompt: "select_account" });
+      shell.openExternal(`https://accounts.google.com/o/oauth2/v2/auth?${q}`);
+    });
+  });
+});
+
 function isInternal(url) {
   return url.startsWith("peridot://") || (devUrl && url.startsWith(devUrl));
 }
@@ -38,7 +99,7 @@ function createWindow() {
     show: false,
     icon: path.join(here, "..", "public", "logo.png"),
     webPreferences: {
-      preload: path.join(here, "preload.mjs"),
+      preload: path.join(here, "preload.cjs"),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
@@ -75,6 +136,7 @@ if (!lock) {
   });
 
   app.whenReady().then(() => {
+    registerWorkspaceIpc();
     if (!devUrl) registerAppProtocol();
     if (process.platform === "darwin") Menu.setApplicationMenu(Menu.buildFromTemplate([{ role: "appMenu" }, { role: "editMenu" }, { role: "viewMenu" }, { role: "windowMenu" }]));
     createWindow();
