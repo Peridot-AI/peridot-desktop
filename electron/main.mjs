@@ -1,31 +1,36 @@
-import { app, BrowserWindow, protocol, net, shell, Menu, ipcMain } from "electron";
+import { app, BrowserWindow, shell, Menu, ipcMain, session } from "electron";
 import http from "node:http";
 import crypto from "node:crypto";
 import { registerWorkspaceIpc, getRoot } from "./workspace.mjs";
 import { registerTerminalIpc } from "./terminal.mjs";
 import path from "node:path";
-import fs from "node:fs";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const distDir = path.join(here, "..", "dist");
-const devUrl = process.env.ELECTRON_START_URL; // set by `bun run electron:dev`
 
-// Serve the built site from a real origin (peridot://app) so the path-based router,
-// absolute asset URLs and CORS all behave like on the web.
-protocol.registerSchemesAsPrivileged([
-  { scheme: "peridot", privileges: { standard: true, secure: true, supportFetchAPI: true } },
-]);
-
-function registerAppProtocol() {
-  protocol.handle("peridot", (request) => {
-    const { pathname } = new URL(request.url);
-    const requested = path.normalize(path.join(distDir, decodeURIComponent(pathname)));
-    const safe = requested.startsWith(distDir) && fs.existsSync(requested) && fs.statSync(requested).isFile();
-    // Unknown paths are client-side routes: fall back to index.html
-    return net.fetch(pathToFileURL(safe ? requested : path.join(distDir, "index.html")).toString());
-  });
+// The app is the hosted website (its /chat page). Override with PERIDOT_URL, e.g. a local dev server.
+const APP_URL = (process.env.PERIDOT_URL || "https://peridot.ai").replace(/\/+$/, "");
+const APP_ORIGIN = new URL(APP_URL).origin;
+const isLocal = ["localhost", "127.0.0.1", "[::1]"].includes(new URL(APP_URL).hostname);
+if (new URL(APP_URL).protocol !== "https:" && !isLocal) {
+  console.error(`Refusing to load ${APP_URL}: remote pages must use https.`);
+  app.exit(1);
 }
+const START_URL = `${APP_URL}/chat`;
+
+const sameOrigin = (url) => {
+  try { return new URL(url).origin === APP_ORIGIN; } catch { return false; }
+};
+
+// The page can read/write files and run commands through these IPC handlers, so they only answer
+// the top-level frame of our own origin. Anything else (other sites, iframes) is refused.
+const realHandle = ipcMain.handle.bind(ipcMain);
+ipcMain.handle = (channel, listener) =>
+  realHandle(channel, (event, ...args) => {
+    const frame = event.senderFrame;
+    if (!frame || frame !== event.sender.mainFrame || !sameOrigin(frame.url)) throw new Error("Blocked: untrusted caller.");
+    return listener(event, ...args);
+  });
 
 // Google refuses OAuth inside embedded windows, so sign-in happens in the user's own browser.
 // A one-shot loopback server on 127.0.0.1 receives the token (implicit flow returns it in the
@@ -94,9 +99,17 @@ fetch("/token?" + location.hash.slice(1)).then(function(){document.getElementByI
   });
 });
 
-function isInternal(url) {
-  return url.startsWith("peridot://") || (devUrl && url.startsWith(devUrl));
-}
+const isInternal = sameOrigin;
+
+// Shown when the site cannot be reached (offline, DNS, server down)
+const offlinePage = (reason) => "data:text/html;charset=utf-8," + encodeURIComponent(`<!doctype html><meta charset="utf-8"><title>Peridot</title>
+<body style="margin:0;height:100vh;display:grid;place-items:center;background:#141413;color:#e8e6e0;font-family:sans-serif;-webkit-app-region:drag">
+<div style="text-align:center;max-width:420px;padding:24px">
+<h2 style="font-weight:500;margin:0 0 10px">Can't reach Peridot</h2>
+<p style="color:#8c8a83;margin:0 0 24px;line-height:1.5">Check your internet connection and try again.<br><small>${String(reason).replace(/[<&>]/g, "")}</small></p>
+<a href="${START_URL}" style="-webkit-app-region:no-drag;display:inline-block;padding:10px 20px;border-radius:10px;background:#6fd3b7;color:#0f1d19;text-decoration:none;font-weight:600">Try again</a>
+<a href="peridot-quit://" style="-webkit-app-region:no-drag;display:inline-block;padding:10px 20px;margin-left:8px;border-radius:10px;border:1px solid #3a3835;color:#e8e6e0;text-decoration:none">Quit</a>
+</div>`);
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -111,6 +124,7 @@ function createWindow() {
     icon: path.join(here, "..", "public", "logo.png"),
     webPreferences: {
       preload: path.join(here, "preload.cjs"),
+      additionalArguments: [`--peridot-origin=${APP_ORIGIN}`],
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
@@ -129,13 +143,20 @@ function createWindow() {
     return { action: "deny" };
   });
   win.webContents.on("will-navigate", (event, url) => {
-    if (!isInternal(url)) {
+    if (url.startsWith("peridot-quit:")) {
+      event.preventDefault();
+      app.quit();
+    } else if (!isInternal(url)) {
       event.preventDefault();
       shell.openExternal(url);
     }
   });
 
-  win.loadURL(devUrl || "peridot://app/");
+  win.webContents.on("did-fail-load", (_e, code, desc, _url, isMainFrame) => {
+    if (isMainFrame && code !== -3) win.loadURL(offlinePage(desc)); // -3 = aborted (a redirect), not a failure
+  });
+
+  win.loadURL(START_URL);
 }
 
 const lock = app.requestSingleInstanceLock();
@@ -153,7 +174,10 @@ if (!lock) {
   app.whenReady().then(() => {
     registerWorkspaceIpc();
     registerTerminalIpc(getRoot);
-    if (!devUrl) registerAppProtocol();
+    // Only the microphone (dictation) and clipboard writes are granted, and only to our own site
+    const allowed = new Set(["media", "clipboard-sanitized-write"]);
+    session.defaultSession.setPermissionRequestHandler((wc, permission, callback) => callback(allowed.has(permission) && sameOrigin(wc.getURL())));
+    session.defaultSession.setPermissionCheckHandler((wc, permission, origin) => allowed.has(permission) && sameOrigin(origin));
     if (process.platform === "darwin") Menu.setApplicationMenu(Menu.buildFromTemplate([{ role: "appMenu" }, { role: "editMenu" }, { role: "viewMenu" }, { role: "windowMenu" }]));
     createWindow();
     app.on("activate", () => {
