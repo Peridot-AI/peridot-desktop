@@ -4,36 +4,15 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
-    "preview": "vite preview",
-    "check": "svelte-check --tsconfig ./tsconfig.app.json && tsc -p tsconfig.node.json",
-    "electron:dev": "node electron/dev.mjs",
-    "electron:start": "vite build && electron .",
-    "electron:build": "vite build && electron-builder",
-    "electron:build:linux": "vite build && electron-builder --linux",
-    "electron:build:win": "vite build && electron-builder --win"
+    "start": "electron .",
+    "dev": "node electron/dev.mjs",
+    "build": "electron-builder",
+    "build:linux": "electron-builder --linux",
+    "build:win": "electron-builder --win"
   },
   "devDependencies": {
-    "@sveltejs/vite-plugin-svelte": "^7.3.0",
-    "@tsconfig/svelte": "^5.0.8",
-    "@types/dompurify": "^3.2.0",
-    "@types/node": "^24.13.3",
     "electron": "^44.9.0",
-    "electron-builder": "^26.15.3",
-    "svelte": "^5.57.0",
-    "svelte-check": "^4.7.6",
-    "typescript": "~6.0.2",
-    "vite": "^8.3.0"
-  },
-  "dependencies": {
-    "@iconify/svelte": "^5.2.2",
-    "@stripe/stripe-js": "^10.1.0",
-    "@xterm/addon-fit": "^0.11.0",
-    "@xterm/xterm": "^6.0.0",
-    "dompurify": "^3.4.17",
-    "marked": "^18.1.1",
-    "svelte-spa-router": "^5.1.1"
+    "electron-builder": "^26.15.3"
   },
   "description": "Peridot AI desktop app",
   "author": "Peridot",
