@@ -122,12 +122,23 @@ function editFile({ path: p, old_string, new_string, replace_all = false }) {
   return `Edited ${relOf(abs)} (${replace_all ? count : 1} replacement${count > 1 && replace_all ? "s" : ""}).`;
 }
 
+// Commands come from the model, so they don't get the app's secrets (API keys, tokens) from the environment.
+// SSH_AUTH_SOCK is only a socket path and keeps git over ssh working.
+const SECRET_ENV = /(TOKEN|SECRET|PASSW(OR)?D|API_?KEY|ACCESS_?KEY|PRIVATE_?KEY|CREDENTIAL|COOKIE|_AUTH$|^AUTH_)/i;
+function commandEnv() {
+  const env = {};
+  for (const [k, v] of Object.entries(process.env)) {
+    if (k === "SSH_AUTH_SOCK" || (!SECRET_ENV.test(k) && !k.startsWith("ELECTRON_"))) env[k] = v;
+  }
+  return env;
+}
+
 const running = new Set();
 function runCommand({ command }) {
   if (!root) throw new Error("No folder is open.");
   return new Promise((resolve) => {
     const isWin = process.platform === "win32";
-    const child = spawn(isWin ? "cmd.exe" : "/bin/sh", isWin ? ["/d", "/s", "/c", command] : ["-c", command], { cwd: root, env: process.env });
+    const child = spawn(isWin ? "cmd.exe" : "/bin/sh", isWin ? ["/d", "/s", "/c", command] : ["-c", command], { cwd: root, env: commandEnv() });
     running.add(child);
     let out = "";
     const add = (d) => { if (out.length < MAX_OUTPUT * 2) out += d.toString(); };

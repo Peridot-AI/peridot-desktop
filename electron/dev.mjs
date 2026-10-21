@@ -1,12 +1,25 @@
-// `bun run dev`: opens Electron against a running dev server of the web app, e.g.
-// PERIDOT_URL=http://localhost:5173 bun run dev
+// Starts Vite and Electron together for `bun run electron:dev`.
 import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
 const electronBin = require("electron");
-const url = process.env.PERIDOT_URL || "http://localhost:5173";
+const url = "http://localhost:5173";
 
-const app = spawn(electronBin, ["."], { stdio: "inherit", env: { ...process.env, PERIDOT_URL: url } });
-app.on("exit", (code) => process.exit(code ?? 0));
-process.on("SIGINT", () => app.kill());
+const vite = spawn("bunx", ["vite", "--port", "5173", "--strictPort"], { stdio: "inherit" });
+
+async function waitForVite() {
+  for (let i = 0; i < 100; i++) {
+    try {
+      if ((await fetch(url)).ok) return;
+    } catch {}
+    await new Promise((r) => setTimeout(r, 300));
+  }
+  throw new Error("Vite did not start in time");
+}
+
+await waitForVite();
+const app = spawn(electronBin, ["."], { stdio: "inherit", env: { ...process.env, ELECTRON_START_URL: url } });
+const stop = () => vite.kill();
+app.on("exit", (code) => { stop(); process.exit(code ?? 0); });
+process.on("SIGINT", () => { app.kill(); stop(); });

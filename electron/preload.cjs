@@ -1,9 +1,7 @@
 const { contextBridge, ipcRenderer } = require("electron");
 
-// Lets the web app know it runs inside the desktop shell. The bridge exists only on our own origin
-// (main passes it in), so a page from anywhere else never sees it.
-const arg = process.argv.find((a) => a.startsWith("--peridot-origin="));
-if (arg && location.origin === arg.slice("--peridot-origin=".length)) contextBridge.exposeInMainWorld("peridotDesktop", {
+// Lets the web app know it runs inside the desktop shell.
+contextBridge.exposeInMainWorld("peridotDesktop", {
   platform: process.platform,
   // Google sign-in through the system browser; resolves with an OAuth access token.
   googleAuth: (clientId) => ipcRenderer.invoke("google-auth", clientId),
