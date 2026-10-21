@@ -3,6 +3,7 @@ import { app, dialog, ipcMain, BrowserWindow, shell } from "electron";
 import fs from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
+import { resolveInside } from "./paths.mjs";
 
 const SKIP_DIRS = new Set([".git", "node_modules", "dist", "build", ".next", ".svelte-kit", "target", "__pycache__", ".venv", "release"]);
 const MAX_FILE_BYTES = 400_000;
@@ -29,21 +30,7 @@ function restoreLast() {
 }
 const isDir = (p) => { try { return fs.statSync(p).isDirectory(); } catch { return false; } };
 
-/** Resolves a user/model supplied path inside the workspace, following symlinks. */
-function inside(rel = ".") {
-  if (!root) throw new Error("No folder is open.");
-  const abs = path.resolve(root, String(rel));
-  // For files that don't exist yet, check the nearest existing parent
-  let probe = abs;
-  while (!fs.existsSync(probe)) {
-    const up = path.dirname(probe);
-    if (up === probe) break;
-    probe = up;
-  }
-  const real = fs.realpathSync(probe);
-  if (real !== root && !real.startsWith(root + path.sep)) throw new Error(`Path is outside the workspace: ${rel}`);
-  return abs;
-}
+const inside = (rel = ".") => resolveInside(root, rel);
 const relOf = (abs) => path.relative(root, abs) || ".";
 
 function listFiles({ path: p = ".", recursive = false }) {
