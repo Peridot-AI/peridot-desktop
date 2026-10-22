@@ -43,6 +43,11 @@ contextBridge.exposeInMainWorld("peridotDesktop", {
     command: (plugin, command, args, user) => ipcRenderer.invoke("plugins:command", plugin, command, args, user),
     tool: (id, input, user) => ipcRenderer.invoke("plugins:tool", id, input, user),
   },
+  // The bots of "Your AI team", saved in the project folder
+  team: {
+    load: () => ipcRenderer.invoke("team:load"),
+    save: (data) => ipcRenderer.invoke("team:save", data),
+  },
   workspace: {
     reveal: () => ipcRenderer.invoke("workspace:reveal"),
     get: () => ipcRenderer.invoke("workspace:get"),

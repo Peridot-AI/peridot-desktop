@@ -4,6 +4,7 @@ import crypto from "node:crypto";
 import { registerWorkspaceIpc, getRoot } from "./workspace.mjs";
 import { registerTerminalIpc } from "./terminal.mjs";
 import { registerPluginsIpc } from "./plugins.mjs";
+import { registerTeamIpc } from "./team.mjs";
 import path from "node:path";
 import fs from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -155,6 +156,7 @@ if (!lock) {
     registerWorkspaceIpc();
     registerTerminalIpc(getRoot);
     registerPluginsIpc();
+    registerTeamIpc(getRoot);
     if (!devUrl) registerAppProtocol();
     if (process.platform === "darwin") Menu.setApplicationMenu(Menu.buildFromTemplate([{ role: "appMenu" }, { role: "editMenu" }, { role: "viewMenu" }, { role: "windowMenu" }]));
     createWindow();
