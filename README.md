@@ -1,6 +1,6 @@
 # Peridot Desktop
 
-Electron shell for [Peridot AI](https://peridot.ai). It opens the hosted web app (`https://peridot.ai/chat`) in its own window and adds what a browser cannot: a custom title bar, Google sign-in through the system browser, project folders for Peridot Code and the integrated terminal.
+Electron shell for [Peridot AI](https://tryperidot.io). It opens the hosted web app (`https://tryperidot.io/chat`) in its own window and adds what a browser cannot: a custom title bar, Google sign-in through the system browser, project folders for Peridot Code and the integrated terminal.
 
 This repository contains **only the desktop shell**. The interface is the website itself, so there is nothing else to build.
 
@@ -18,7 +18,7 @@ Requires internet access. If the site cannot be reached the app shows a "Can't r
 
 | Variable | Default | |
 |---|---|---|
-| `PERIDOT_URL` | `https://peridot.ai` | Site to load. Must be `https://`, except `localhost` / `127.0.0.1` for development: `PERIDOT_URL=http://localhost:5173 bun run dev` |
+| `PERIDOT_URL` | `https://tryperidot.io` | Site to load. Must be `https://`, except `localhost` / `127.0.0.1` for development: `PERIDOT_URL=http://localhost:5173 bun run dev` |
 
 The API server's `CORS_ORIGIN` must include the site's origin.
 

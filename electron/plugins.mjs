@@ -1,5 +1,5 @@
 // Installed plugins, shared with the CLI: ~/.config/peridot/plugins/<name> (or $XDG_CONFIG_HOME/peridot/plugins).
-// Installing downloads the commit that was approved on peridot.ai from the plugin's GitHub repository.
+// Installing downloads the commit that was approved on tryperidot.io from the plugin's GitHub repository.
 import { app, ipcMain } from "electron";
 import { fork, spawn } from "node:child_process";
 import fs from "node:fs";
@@ -49,7 +49,7 @@ async function install(name, repoUrl, sha) {
   if (!slug) throw new Error("This plugin has no GitHub repository to install from.");
   if (!/^[0-9a-f]{40}$/.test(String(sha))) throw new Error("This plugin has no approved version to install yet.");
 
-  // The exact commit that was approved on peridot.ai
+  // The exact commit that was approved on tryperidot.io
   const res = await fetch(`https://codeload.github.com/${slug}/tar.gz/${sha}`);
   if (!res.ok) throw new Error(`Could not download ${slug} from GitHub (${res.status}).`);
 
