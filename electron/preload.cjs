@@ -33,6 +33,12 @@ contextBridge.exposeInMainWorld("peridotDesktop", {
       return () => ipcRenderer.removeListener(ch, h);
     },
   },
+  // Plugins installed on this computer (same folder as the CLI's)
+  plugins: {
+    installed: () => ipcRenderer.invoke("plugins:installed"),
+    install: (name, repoUrl) => ipcRenderer.invoke("plugins:install", name, repoUrl),
+    uninstall: (name) => ipcRenderer.invoke("plugins:uninstall", name),
+  },
   workspace: {
     reveal: () => ipcRenderer.invoke("workspace:reveal"),
     get: () => ipcRenderer.invoke("workspace:get"),
