@@ -38,6 +38,10 @@ contextBridge.exposeInMainWorld("peridotDesktop", {
     installed: () => ipcRenderer.invoke("plugins:installed"),
     install: (name, repoUrl) => ipcRenderer.invoke("plugins:install", name, repoUrl),
     uninstall: (name) => ipcRenderer.invoke("plugins:uninstall", name),
+    // Commands and agent tools of the installed plugins; they run in the main process
+    loaded: () => ipcRenderer.invoke("plugins:loaded"),
+    command: (plugin, command, args, user) => ipcRenderer.invoke("plugins:command", plugin, command, args, user),
+    tool: (id, input, user) => ipcRenderer.invoke("plugins:tool", id, input, user),
   },
   workspace: {
     reveal: () => ipcRenderer.invoke("workspace:reveal"),
