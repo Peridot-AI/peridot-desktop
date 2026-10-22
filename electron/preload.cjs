@@ -36,7 +36,7 @@ contextBridge.exposeInMainWorld("peridotDesktop", {
   // Plugins installed on this computer (same folder as the CLI's)
   plugins: {
     installed: () => ipcRenderer.invoke("plugins:installed"),
-    install: (name, repoUrl) => ipcRenderer.invoke("plugins:install", name, repoUrl),
+    install: (name, repoUrl, sha) => ipcRenderer.invoke("plugins:install", name, repoUrl, sha),
     uninstall: (name) => ipcRenderer.invoke("plugins:uninstall", name),
     // Commands and agent tools of the installed plugins; they run in the main process
     loaded: () => ipcRenderer.invoke("plugins:loaded"),

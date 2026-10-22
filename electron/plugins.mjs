@@ -1,5 +1,5 @@
 // Installed plugins, shared with the CLI: ~/.config/peridot/plugins/<name> (or $XDG_CONFIG_HOME/peridot/plugins).
-// Installing downloads the plugin's GitHub repository; the web app only offers plugins approved on peridot.ai.
+// Installing downloads the commit that was approved on peridot.ai from the plugin's GitHub repository.
 import { ipcMain } from "electron";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
@@ -41,12 +41,14 @@ function untar(file, dest) {
   });
 }
 
-async function install(name, repoUrl) {
+async function install(name, repoUrl, sha) {
   if (!PLUGIN_NAME.test(String(name))) throw new Error(`Invalid plugin name: ${name}`);
   const slug = githubSlug(repoUrl);
   if (!slug) throw new Error("This plugin has no GitHub repository to install from.");
+  if (!/^[0-9a-f]{40}$/.test(String(sha))) throw new Error("This plugin has no approved version to install yet.");
 
-  const res = await fetch(`https://codeload.github.com/${slug}/tar.gz/HEAD`);
+  // The exact commit that was approved on peridot.ai
+  const res = await fetch(`https://codeload.github.com/${slug}/tar.gz/${sha}`);
   if (!res.ok) throw new Error(`Could not download ${slug} from GitHub (${res.status}).`);
 
   await fsp.mkdir(PLUGINS_DIR, { recursive: true });
@@ -67,7 +69,7 @@ async function install(name, repoUrl) {
     await fsp.rm(dest, { recursive: true, force: true });
     await fsp.rename(staging, dest);
 
-    const entry = { name, version, repo: `https://github.com/${slug}`, installedAt: new Date().toISOString() };
+    const entry = { name, version, repo: `https://github.com/${slug}`, sha, installedAt: new Date().toISOString() };
     const index = await readIndex();
     index[name] = entry;
     await saveIndex(index);
@@ -219,8 +221,8 @@ export async function runTool(id, input, user) {
 
 export function registerPluginsIpc() {
   ipcMain.handle("plugins:installed", () => readIndex());
-  ipcMain.handle("plugins:install", async (_e, name, repoUrl) => {
-    const entry = await install(name, repoUrl);
+  ipcMain.handle("plugins:install", async (_e, name, repoUrl, sha) => {
+    const entry = await install(name, repoUrl, sha);
     await reload();
     return entry;
   });
