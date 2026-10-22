@@ -1,13 +1,15 @@
 // Installed plugins, shared with the CLI: ~/.config/peridot/plugins/<name> (or $XDG_CONFIG_HOME/peridot/plugins).
 // Installing downloads the commit that was approved on peridot.ai from the plugin's GitHub repository.
-import { ipcMain } from "electron";
-import { spawn } from "node:child_process";
+import { app, ipcMain } from "electron";
+import { fork, spawn } from "node:child_process";
 import fs from "node:fs";
 import fsp from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
-import { workspaceApi } from "./workspace.mjs";
+import { fileURLToPath } from "node:url";
+import { getRoot } from "./workspace.mjs";
+
+const here = path.dirname(fileURLToPath(import.meta.url));
 
 const PLUGINS_DIR = path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config"), "peridot", "plugins");
 const INDEX = path.join(PLUGINS_DIR, "installed.json");
@@ -88,15 +90,14 @@ async function uninstall(name) {
   await saveIndex(index);
 }
 
-// ── Runtime: plugins are TypeScript modules (Electron's Node strips the types) whose default export
-// is definePlugin({ ... }). They run in this main process, with the app's permissions, which is why
-// only plugins approved on peridot.ai are offered for install.
+// ── Runtime: installed plugins run in plugin-host.mjs, a child process using Electron's own Node
+// (ELECTRON_RUN_AS_NODE) with the permission model on: it can read only the plugins folder and the
+// open project, write only in the project, and cannot start programs. The host is restarted when the
+// project changes (its permissions name the folder), after installs, and when a call hangs.
 
-const COMMAND_NAME = /^[a-z][a-z0-9-]{0,30}$/;
-const TOOL_NAME = /^[a-z][a-z0-9_]{0,39}$/;
-const toolId = (plugin, tool) => `${plugin.replace(/-/g, "_")}__${tool}`;
-
+const CALL_TIMEOUT = 30_000;
 // `import { definePlugin } from "@peridot/plugin"` resolves to this, written next to each plugin
+// (by this process: the host may not write there)
 const SHIM_JS = "export const definePlugin = (plugin) => plugin;\nexport default { definePlugin };\n";
 
 async function ensureShim(dir) {
@@ -107,128 +108,127 @@ async function ensureShim(dir) {
   await fsp.writeFile(path.join(shim, "index.js"), SHIM_JS);
 }
 
-async function entryOf(dir) {
-  let main;
-  try {
-    main = JSON.parse(await fsp.readFile(path.join(dir, "package.json"), "utf8")).main;
-  } catch {}
-  for (const rel of [main, "src/index.ts", "index.ts", "index.js"]) {
-    if (!rel) continue;
-    const abs = path.resolve(dir, rel);
-    if (!abs.startsWith(dir + path.sep)) continue; // main must stay inside the plugin folder
-    if (fs.existsSync(abs)) return abs;
+/** { child, root, info, pending, nextId } for the running host, or null */
+let host = null;
+let starting = null;
+
+function stopHost() {
+  if (!host) return;
+  for (const { reject, timer } of host.pending.values()) {
+    clearTimeout(timer);
+    reject(new Error("The plugin host stopped."));
   }
-  throw new Error("no entry file (package.json main or src/index.ts)");
+  host.child.kill();
+  host = null;
 }
 
-/** name → { name, version, description, commands, tools } */
-let loaded = new Map();
-let loadErrors = [];
-
-function makeCtx(plugin, user, output) {
-  return {
-    client: "desktop",
-    platform: process.platform,
-    user: user && typeof user === "object" ? { name: user.name, email: String(user.email ?? "") } : null,
-    workspace: workspaceApi,
-    print: (text) => output.push(String(text)),
-    log: (text) => console.log(`[plugin ${plugin}] ${text}`),
-  };
+function call(h, msg) {
+  return new Promise((resolve, reject) => {
+    const id = ++h.nextId;
+    const timer = setTimeout(() => {
+      h.pending.delete(id);
+      reject(new Error("The plugin took too long and was stopped."));
+      if (host === h) stopHost(); // a stuck plugin would block every later call
+    }, CALL_TIMEOUT);
+    h.pending.set(id, { resolve, reject, timer });
+    h.child.send({ ...msg, id });
+  });
 }
 
-async function loadAll() {
-  loaded = new Map();
-  loadErrors = [];
-  for (const name of Object.keys(await readIndex())) {
-    if (!PLUGIN_NAME.test(name)) continue;
-    const dir = path.join(PLUGINS_DIR, name);
-    try {
-      await ensureShim(dir);
-      // The query makes a reinstalled plugin load fresh instead of from the module cache
-      const mod = await import(`${pathToFileURL(await entryOf(dir)).href}?v=${Date.now()}`);
-      const def = mod?.default ?? mod;
-      if (!def || typeof def !== "object") throw new Error("the default export is not a plugin");
-      const commands = {};
-      for (const [k, c] of Object.entries(def.commands ?? {})) {
-        if (COMMAND_NAME.test(k) && typeof c?.run === "function") commands[k] = c;
-        else loadErrors.push(`${name}: skipped command "${k}"`);
-      }
-      const tools = {};
-      for (const [k, t] of Object.entries(def.tools ?? {})) {
-        if (TOOL_NAME.test(k) && typeof t?.run === "function" && typeof t.description === "string") tools[k] = t;
-        else loadErrors.push(`${name}: skipped tool "${k}"`);
-      }
-      await def.activate?.(makeCtx(name, null, []));
-      loaded.set(name, { name, version: String(def.version ?? "0.0.0"), description: String(def.description ?? ""), commands, tools });
-    } catch (e) {
-      loadErrors.push(`${name}: ${e?.message || e}`);
+async function startHost(root) {
+  await fsp.mkdir(PLUGINS_DIR, { recursive: true });
+  const names = Object.keys(await readIndex()).filter((n) => PLUGIN_NAME.test(n));
+  for (const n of names) if (fs.existsSync(path.join(PLUGINS_DIR, n))) await ensureShim(path.join(PLUGINS_DIR, n));
+
+  // The host script is copied next to the plugins, so reading it needs no extra permission (and works
+  // from inside the packaged app's archive)
+  const hostDir = path.join(PLUGINS_DIR, ".host");
+  await fsp.mkdir(hostDir, { recursive: true });
+  const hostFile = path.join(hostDir, "plugin-host.mjs");
+  await fsp.writeFile(hostFile, await fsp.readFile(path.join(here, "plugin-host.mjs")));
+
+  const realPlugins = fs.realpathSync(PLUGINS_DIR);
+  const allow = (flag, dir) => [`--allow-fs-${flag}=${dir}`, `--allow-fs-${flag}=${path.join(dir, "*")}`];
+  const execArgv = ["--permission", ...allow("read", realPlugins), ...(root ? [...allow("read", root), ...allow("write", root)] : [])];
+  const child = fork(hostFile, [realPlugins, root ?? ""], {
+    execPath: process.execPath,
+    execArgv,
+    env: { ELECTRON_RUN_AS_NODE: "1", PATH: process.env.PATH ?? "" },
+    stdio: ["ignore", "inherit", "inherit", "ipc"],
+  });
+  const h = { child, root, info: { plugins: [], errors: [] }, pending: new Map(), nextId: 0 };
+  child.on("message", (m) => {
+    const p = h.pending.get(m?.id);
+    if (!p) return;
+    h.pending.delete(m.id);
+    clearTimeout(p.timer);
+    m.ok ? p.resolve(m.result) : p.reject(new Error(m.error));
+  });
+  child.on("exit", () => {
+    for (const { reject, timer } of h.pending.values()) {
+      clearTimeout(timer);
+      reject(new Error("The plugin host stopped."));
     }
+    h.pending.clear();
+    if (host === h) host = null;
+  });
+  host = h;
+  h.info = await call(h, { op: "load", names });
+  return h;
+}
+
+/** The host for the current project, started (or restarted for another project) when needed. */
+async function getHost() {
+  const root = getRoot();
+  if (host && host.root === root) return host;
+  if (starting) await starting.catch(() => {});
+  if (host && host.root === root) return host;
+  stopHost();
+  starting = startHost(root);
+  try {
+    return await starting;
+  } finally {
+    starting = null;
   }
 }
 
-let ready = null;
-const whenLoaded = () => (ready ??= loadAll());
-const reload = () => (ready = loadAll());
-
-/** Commands and tools of the loaded plugins, without their code, for the renderer */
+/** Commands and tools of the loaded plugins, for the renderer */
 export async function describe() {
-  await whenLoaded();
-  return {
-    errors: loadErrors,
-    plugins: [...loaded.values()].map((p) => ({
-      name: p.name,
-      version: p.version,
-      commands: Object.entries(p.commands).map(([name, c]) => ({ name, desc: String(c.desc ?? ""), usage: c.usage ? String(c.usage) : "" })),
-      tools: Object.entries(p.tools).map(([name, t]) => ({
-        name: toolId(p.name, name),
-        description: `[${p.name} plugin] ${t.description}`,
-        input_schema: t.input && typeof t.input === "object" ? t.input : { type: "object", properties: {} },
-        approval: t.approval === "edit" || t.approval === "command" ? t.approval : null,
-      })),
-    })),
-  };
+  try {
+    return (await getHost()).info;
+  } catch (e) {
+    return { plugins: [], errors: [`Plugins could not start: ${e?.message || e}`] };
+  }
 }
 
 export async function runCommand(plugin, command, args, user) {
-  await whenLoaded();
-  const cmd = loaded.get(plugin)?.commands[command];
-  if (!cmd) return { ok: false, output: `Unknown command /${command}` };
-  const output = [];
   try {
-    await cmd.run(Array.isArray(args) ? args.map(String) : [], makeCtx(plugin, user, output));
-    return { ok: true, output: output.join("\n") };
+    return await call(await getHost(), { op: "command", plugin, command, args, user });
   } catch (e) {
-    return { ok: false, output: [...output, e?.message || String(e)].join("\n") };
+    return { ok: false, output: e?.message || String(e) };
   }
 }
 
 export async function runTool(id, input, user) {
-  await whenLoaded();
-  for (const p of loaded.values()) {
-    for (const [name, t] of Object.entries(p.tools)) {
-      if (toolId(p.name, name) !== id) continue;
-      try {
-        const r = await t.run(input ?? {}, makeCtx(p.name, user, []));
-        if (r && typeof r === "object" && "output" in r) return { ok: r.ok !== false, output: String(r.output) };
-        return { ok: true, output: r === undefined ? "(done)" : typeof r === "string" ? r : JSON.stringify(r) };
-      } catch (e) {
-        return { ok: false, output: e?.message || String(e) };
-      }
-    }
+  try {
+    return await call(await getHost(), { op: "tool", id2: id, input, user });
+  } catch (e) {
+    return { ok: false, output: e?.message || String(e) };
   }
-  return { ok: false, output: `Unknown tool: ${id}` };
 }
+
+app.on("will-quit", stopHost);
 
 export function registerPluginsIpc() {
   ipcMain.handle("plugins:installed", () => readIndex());
   ipcMain.handle("plugins:install", async (_e, name, repoUrl, sha) => {
     const entry = await install(name, repoUrl, sha);
-    await reload();
+    stopHost(); // loads the new plugin on next use
     return entry;
   });
   ipcMain.handle("plugins:uninstall", async (_e, name) => {
+    stopHost();
     await uninstall(name);
-    await reload();
   });
   ipcMain.handle("plugins:loaded", () => describe());
   ipcMain.handle("plugins:command", (_e, plugin, command, args, user) => runCommand(plugin, command, args, user));

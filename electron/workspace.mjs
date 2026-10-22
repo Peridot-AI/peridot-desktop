@@ -145,7 +145,7 @@ function runCommand({ command }) {
 
 const TOOLS = { list_files: listFiles, read_file: readFile, search, write_file: writeFile, edit_file: editFile, run_command: runCommand };
 
-export const getRoot = () => root;
+export const getRoot = () => { restoreLast(); return root; };
 
 export function registerWorkspaceIpc() {
   ipcMain.handle("workspace:get", () => { restoreLast(); return { root, recent: readStore().recent.filter(isDir) }; });
@@ -187,23 +187,3 @@ export function registerWorkspaceIpc() {
   ipcMain.handle("workspace:stop", () => { for (const c of running) c.kill("SIGKILL"); });
 }
 
-/** What plugins get as ctx.workspace: the same folder confinement as the agent's tools. */
-const needRoot = () => {
-  restoreLast();
-  if (!root) throw new Error("Open a project folder first.");
-};
-export const workspaceApi = {
-  get root() { restoreLast(); return root; },
-  readFile: (p) => { needRoot(); return readText(inside(p)); },
-  writeFile: (p, content) => { needRoot(); writeFile({ path: p, content }); },
-  listFiles: (p = ".", recursive = false) => {
-    needRoot();
-    const out = listFiles({ path: p, recursive });
-    return out === "(empty)" ? [] : out.split("\n");
-  },
-  search: (pattern, p = ".") => {
-    needRoot();
-    const out = search({ pattern, path: p });
-    return out === "No matches." ? [] : out.split("\n");
-  },
-};
