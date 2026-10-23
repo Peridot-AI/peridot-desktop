@@ -171,6 +171,12 @@ export function registerWorkspaceIpc() {
     try { fs.writeFileSync(storeFile(), JSON.stringify({ recent: readStore().recent, last: null })); } catch {}
   });
 
+  // PERIDOT.md in the project root: the user's standing instructions, sent with every agent turn
+  ipcMain.handle("workspace:instructions", () => {
+    if (!root) return null;
+    try { return readText(inside("PERIDOT.md")); } catch { return null; }
+  });
+
   ipcMain.handle("workspace:tool", async (_e, name, input) => {
     const fn = TOOLS[name];
     if (!fn) return { ok: false, output: `Unknown tool: ${name}` };

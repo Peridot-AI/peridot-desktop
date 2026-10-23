@@ -55,6 +55,7 @@ contextBridge.exposeInMainWorld("peridotDesktop", {
     open: (dir) => ipcRenderer.invoke("workspace:open", dir),
     close: () => ipcRenderer.invoke("workspace:close"),
     tool: (name, input) => ipcRenderer.invoke("workspace:tool", name, input),
+    instructions: () => ipcRenderer.invoke("workspace:instructions"),
     stop: () => ipcRenderer.invoke("workspace:stop"),
   },
 });
