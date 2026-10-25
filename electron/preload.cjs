@@ -43,6 +43,16 @@ contextBridge.exposeInMainWorld("peridotDesktop", {
     command: (plugin, command, args, user) => ipcRenderer.invoke("plugins:command", plugin, command, args, user),
     tool: (id, input, user) => ipcRenderer.invoke("plugins:tool", id, input, user),
   },
+  // Updates: the website lists the latest version; install downloads it and restarts the app
+  updates: {
+    check: () => ipcRenderer.invoke("update:check"),
+    install: () => ipcRenderer.invoke("update:install"),
+    onProgress: (cb) => {
+      const h = (_e, pct) => cb(pct);
+      ipcRenderer.on("update:progress", h);
+      return () => ipcRenderer.removeListener("update:progress", h);
+    },
+  },
   // The bots of "Your AI team", saved in the project folder
   team: {
     load: () => ipcRenderer.invoke("team:load"),
